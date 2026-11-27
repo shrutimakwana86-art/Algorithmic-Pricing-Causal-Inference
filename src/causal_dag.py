@@ -1,25 +1,11 @@
-import os
 import pandas as pd
-import networkx as nx
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 from dowhy import CausalModel
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
-# Create outputs directory if it does not exist
-os.makedirs("outputs", exist_ok=True)
-
-# 1. Load dataset
+# 1. Load dataset and validate Causal Model with DoWhy
 df = pd.read_csv("data/regional_pricing_data.csv")
 
-# 2. Separate Pre-Treatment (Days 1-70) and Post-Treatment (Days 71-100) periods
-pre_df = df[df["day"] <= 70].copy()
-post_df = df[df["day"] > 70].copy()
-
-pre_df.to_csv("data/pre_treatment.csv", index=False)
-post_df.to_csv("data/post_treatment.csv", index=False)
-print(f"Data split complete: Pre-treatment rows = {len(pre_df)}, Post-treatment rows = {len(post_df)}")
-
-# 3. Construct Causal Directed Acyclic Graph (DAG) using DoWhy
 causal_graph = """
 digraph {
     demand_index -> treatment;
@@ -27,8 +13,8 @@ digraph {
     competitor_price -> treatment;
     competitor_price -> revenue;
     treatment -> our_price;
-    our_price -> revenue;
     treatment -> revenue;
+    our_price -> revenue;
 }
 """
 
@@ -39,115 +25,101 @@ model = CausalModel(
     graph=causal_graph
 )
 
-# 4. Identify causal estimand and confounders
 identified_estimand = model.identify_effect(proceed_when_unidentifiable=True)
-print("\n--- Identified Causal Estimand & Confounders ---")
 print(identified_estimand)
 
-# 5. Create a Clean, Non-Overlapping Enterprise Causal DAG
-G = nx.DiGraph()
+# 2. Generate exact Color-Coded Causal DAG Diagram
+fig, ax = plt.subplots(figsize=(10, 6.5))
+ax.set_xlim(0, 10)
+ax.set_ylim(0, 7)
+ax.axis("off")
+
+# Title
+plt.title("Causal Directed Acyclic Graph (DAG): Algorithmic Pricing Impact", fontsize=13, fontweight="bold", pad=12)
+
+# Node coordinates (x, y) and styling matching your document figure
+nodes = {
+    "demand_index": {
+        "pos": (2.2, 5.7),
+        "label": "Market Demand\n(demand_index)",
+        "color": "#C85A32"  # Confounder (Rust/Orange)
+    },
+    "competitor_price": {
+        "pos": (6.8, 5.2),
+        "label": "Competitor Price\n(competitor_price)",
+        "color": "#C85A32"  # Confounder (Rust/Orange)
+    },
+    "treatment": {
+        "pos": (1.2, 3.7),
+        "label": "Dynamic Pricing\n(treatment)",
+        "color": "#2B7BBA"  # Treatment (Blue)
+    },
+    "our_price": {
+        "pos": (5.0, 2.1),
+        "label": "Product Price\n(our_price)",
+        "color": "#6A5ACD"  # Mediator (Purple)
+    },
+    "revenue": {
+        "pos": (8.6, 3.3),
+        "label": "Daily Revenue\n(revenue)",
+        "color": "#3B8E5B"  # Outcome (Green)
+    }
+}
+
+# Draw directed edges (arrows)
 edges = [
-    ("demand_index", "treatment"),
-    ("demand_index", "revenue"),
-    ("competitor_price", "treatment"),
-    ("competitor_price", "revenue"),
-    ("treatment", "our_price"),
-    ("our_price", "revenue"),
-    ("treatment", "revenue")
+    ("demand_index", "treatment", (1.9, 5.3), (1.3, 4.15)),
+    ("demand_index", "revenue", (2.8, 5.5), (8.1, 3.6)),
+    ("competitor_price", "treatment", (6.1, 5.1), (1.8, 3.95)),
+    ("competitor_price", "revenue", (7.1, 4.8), (8.4, 3.75)),
+    ("treatment", "our_price", (1.6, 3.3), (4.4, 2.3)),
+    ("treatment", "revenue", (1.9, 3.65), (7.95, 3.35)),
+    ("our_price", "revenue", (5.6, 2.25), (8.0, 3.05))
 ]
-G.add_edges_from(edges)
 
-# Exact coordinates for each node
-pos = {
-    "demand_index": (0.28, 0.82),
-    "competitor_price": (0.72, 0.82),
-    "treatment": (0.12, 0.45),
-    "our_price": (0.50, 0.16),
-    "revenue": (0.88, 0.45)
-}
-
-labels = {
-    "demand_index": "Market Demand\n(demand_index)",
-    "competitor_price": "Competitor Price\n(competitor_price)",
-    "treatment": "Dynamic Pricing\n(treatment)",
-    "our_price": "Product Price\n(our_price)",
-    "revenue": "Daily Revenue\n(revenue)"
-}
-
-# Exact color mapping per node name
-color_map = {
-    "demand_index": "#E67E22",      # Orange (Confounder)
-    "competitor_price": "#E67E22",  # Orange (Confounder)
-    "treatment": "#2980B9",         # Blue (Treatment)
-    "our_price": "#8E44AD",         # Purple (Mediator)
-    "revenue": "#27AE60"            # Green (Outcome)
-}
-
-fig, ax = plt.subplots(figsize=(12, 7), dpi=150)
-fig.patch.set_facecolor("white")
-ax.set_facecolor("#F8F9FA")
-
-# Draw directed arrows first (behind boxes)
-for u, v in edges:
-    is_main = (u == "treatment" and v == "revenue")
+for start_node, end_node, start_xy, end_xy in edges:
+    is_main_effect = (start_node == "treatment" and end_node == "revenue")
     ax.annotate(
         "",
-        xy=pos[v], xytext=pos[u],
+        xy=end_xy,
+        xytext=start_xy,
         arrowprops=dict(
-            arrowstyle="-|>,head_length=0.8,head_width=0.45",
-            color="#2980B9" if is_main else "#566573",
-            lw=2.8 if is_main else 1.8,
-            shrinkA=42, shrinkB=42,
-            connectionstyle="arc3,rad=0.06" if not is_main else "arc3,rad=0.0"
-        ),
-        zorder=1
-    )
-
-# Draw clean rounded boxes for each node so text never overflows
-for node, (x, y) in pos.items():
-    ax.text(
-        x, y, labels[node],
-        ha="center", va="center",
-        fontsize=10.5, fontweight="bold", color="white",
-        bbox=dict(
-            boxstyle="round,pad=0.75,rounding_size=0.2",
-            facecolor=color_map[node],
-            edgecolor="#1C2833",
-            linewidth=1.5
+            arrowstyle="-|>,head_length=0.7,head_width=0.4",
+            color="#2B7BBA" if is_main_effect else "#555555",
+            lw=2.4 if is_main_effect else 1.4,
+            shrinkA=0,
+            shrinkB=0
         ),
         zorder=2
     )
 
-# Place Legend cleanly BELOW the graph (no overlap)
-legend_handles = [
-    mpatches.Patch(color="#2980B9", label="Treatment (Intervention)"),
-    mpatches.Patch(color="#27AE60", label="Outcome (Target KPI)"),
-    mpatches.Patch(color="#E67E22", label="Confounders (Adjusted via DoWhy & DML)"),
-    mpatches.Patch(color="#8E44AD", label="Mediator (Price Mechanism)")
+# Draw rectangular boxes
+for key, info in nodes.items():
+    x, y = info["pos"]
+    ax.text(
+        x, y, info["label"],
+        ha="center", va="center",
+        fontsize=9.5, fontweight="bold", color="white",
+        bbox=dict(boxstyle="round,pad=0.6", facecolor=info["color"], edgecolor="#333333", lw=1),
+        zorder=3
+    )
+
+# Add Legend at the bottom
+legend_elements = [
+    patches.Patch(facecolor="#2B7BBA", label="Treatment (Intervention)"),
+    patches.Patch(facecolor="#3B8E5B", label="Outcome (Target KPI)"),
+    patches.Patch(facecolor="#C85A32", label="Confounders (Adjusted via DoWhy & DML)"),
+    patches.Patch(facecolor="#6A5ACD", label="Mediator (Price Mechanism)")
 ]
 ax.legend(
-    handles=legend_handles,
-    loc="upper center",
-    bbox_to_anchor=(0.5, -0.02),
+    handles=legend_elements,
+    loc="lower center",
+    bbox_to_anchor=(0.5, 0.02),
     ncol=2,
-    frameon=True,
-    facecolor="white",
-    edgecolor="#BDC3C7",
-    fontsize=10
+    frameon=False,
+    fontsize=9
 )
 
-plt.title(
-    "Causal Directed Acyclic Graph (DAG): Algorithmic Pricing Impact",
-    fontsize=14,
-    fontweight="bold",
-    color="#1C2833",
-    pad=15
-)
-plt.xlim(-0.02, 1.02)
-plt.ylim(0.02, 0.98)
-plt.axis("off")
 plt.tight_layout()
-
 plt.savefig("outputs/causal_dag.png", dpi=300, bbox_inches="tight")
-print("Clean Causal DAG saved at: outputs/causal_dag.png")
-plt.show()
+print("Updated Causal DAG saved to 'outputs/causal_dag.png'!")
